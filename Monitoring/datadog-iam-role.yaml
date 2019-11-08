@@ -25,8 +25,6 @@ Resources:
             Effect: "Allow"
             Principal:
               AWS: !Sub "arn:aws:iam::${DatadogAwsAccountId}:root"
-              #Service: 
-              #  - "ec2.amazonaws.com"
             Action: "sts:AssumeRole"
             Condition:
               StringEquals:
