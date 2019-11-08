@@ -1,0 +1,375 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: Growi on AWS
+
+Parameters:
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+  PublicSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+
+  GrowiVersion:
+    Type: String
+    Default: 3.5.18
+
+  NodeEnv:
+    Type: String
+    Default: production
+    AllowedValues:
+      - production
+      - development
+
+  AppPort:
+    Type: Number
+    Default: 3000
+
+  DBUsername:
+    Type: String
+    Default: growi
+
+  DBPort:
+    Type: Number
+    Default: 27017
+
+  DBInstanceClass:
+    Type: String
+    Default: db.r5.large
+    AllowedValues:
+      - db.r5.large
+      - db.r5.xlarge
+      - db.r5.2xlarge
+      - db.r5.4xlarge
+      - db.r5.12xlarge
+      - db.r5.24xlarge
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: "Network Configuration"
+        Parameters:
+          - VpcId
+          - PublicSubnetIds
+          - PrivateSubnetIds
+      -
+        Label:
+          default: "Application Configuration"
+        Parameters:
+          - GrowiVersion
+          - NodeEnv
+          - AppPort
+          - DBUsername
+          - DBPort
+          - DBInstanceClass
+    ParameterLabels: {}
+
+Resources:
+
+  elbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: for Growi LoadBalancer
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '443'
+        ToPort: '443'
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp: 0.0.0.0/0
+      VpcId: !Ref VpcId
+
+  appSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: for Growi App
+      SecurityGroupIngress: 
+        - IpProtocol: tcp
+          FromPort: !Ref AppPort
+          ToPort: !Ref AppPort
+          SourceSecurityGroupId: !Ref elbSecurityGroup
+      VpcId: !Ref VpcId
+
+  dbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: for Growi DB
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref DBPort
+          ToPort: !Ref DBPort
+          SourceSecurityGroupId: !Ref appSecurityGroup
+      VpcId: !Ref VpcId
+
+  GrowiDBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${DBUsername}"}'
+        GenerateStringKey: password
+        PasswordLength: 8
+        ExcludeCharacters: '"@/\'
+
+  GrowiDBSubnetGroup:
+    Type: AWS::DocDB::DBSubnetGroup
+    Properties: 
+      DBSubnetGroupDescription: Subnet Group for Growi
+      SubnetIds: !Ref PrivateSubnetIds
+
+  GrowiDBClusterParameterGroup:
+    Type: "AWS::DocDB::DBClusterParameterGroup"
+    Properties:
+       Description: Disable TLS
+       Family: docdb3.6
+       Parameters: {"tls": "disabled"}
+
+  GrowiDBCluster: 
+    Type: "AWS::DocDB::DBCluster"
+    Properties: 
+      #BackupRetentionPeriod : 8
+      DBClusterParameterGroupName : !Ref GrowiDBClusterParameterGroup
+      DBSubnetGroupName : !Ref GrowiDBSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref dbSecurityGroup
+      MasterUsername : !Ref DBUsername
+      MasterUserPassword : !Sub '{{resolve:secretsmanager:${GrowiDBSecret}:SecretString:password}}'
+      Port : !Ref DBPort
+      #PreferredBackupWindow : "07:34-08:04"
+      #PreferredMaintenanceWindow : "sat:04:51-sat:05:21"
+      StorageEncrypted : true
+      #EnableCloudwatchLogsExports:
+      #  - audit
+      #  - profiler
+
+  GrowiDBInstance1:
+    Type: AWS::DocDB::DBInstance
+    Properties:
+      DBClusterIdentifier: !Ref GrowiDBCluster
+      DBInstanceClass: !Ref DBInstanceClass
+
+  #GrowiTaskRole: 
+  #  Type: "AWS::IAM::Role"
+  #  Properties:
+  #    AssumeRolePolicyDocument: 
+  #      Version: "2012-10-17"
+  #      Statement: 
+  #        - 
+  #          Effect: "Allow"
+  #          Principal:
+  #            Service: 
+  #              - "ecs-tasks.amazonaws.com"
+  #          Action: "sts:AssumeRole"
+  #    Path: "/"
+  #    Policies:
+  #      - PolicyName: s3
+  #        PolicyDocument: !Sub |
+  #          {
+  #              "Version": "2012-10-17",
+  #              "Statement": [
+  #                  {
+  #                      "Effect": "Allow",
+  #                      "Action": "s3:*",
+  #                      "Resource": "${Bucket.Arn}"
+  #                  }
+  #              ]
+  #          }
+
+  LogGroup: 
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ${AWS::StackName}/ecs
+      RetentionInDays: 7
+
+  GrowiTaskDefinition: 
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: GrowiTaskDefinition
+      RequiresCompatibilities:
+        - "EC2"
+        - "FARGATE"
+      NetworkMode: awsvpc
+      Cpu: "256"
+      Memory: "512"
+      #TaskRoleArn: !Ref GrowiTaskRole
+      ExecutionRoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/ecsTaskExecutionRole'
+      ContainerDefinitions: 
+        - 
+          Name: growi
+          Image: !Sub 'weseek/growi:${GrowiVersion}'
+          Essential: "true"
+          PortMappings: 
+            - ContainerPort: !Ref AppPort
+          Environment:
+            - Name: MONGO_URI
+              Value: !Sub 'mongodb://${DBUsername}:{{resolve:secretsmanager:${GrowiDBSecret}:SecretString:password}}@${GrowiDBCluster.Endpoint}:${DBPort}/growi'
+            - Name: NODE_ENV
+              Value: !Ref NodeEnv
+            - Name: PORT
+              Value: !Ref AppPort
+            #- Name: ELASTICSEARCH_URI
+            #  Value: !Ref AppPort
+          #Secrets:
+          #  - Name: DB_SECRET
+          #    ValueFrom: !Ref GrowiDBSecret
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: stdout
+
+  GrowiCluster:
+    Type: AWS::ECS::Cluster
+
+  GrowiService:
+    Type: AWS::ECS::Service
+    DependsOn: Listener
+    Properties: 
+      Cluster: !Ref GrowiCluster
+      DesiredCount: 1
+      #EnableECSManagedTags: Boolean
+      #HealthCheckGracePeriodSeconds: Integer
+      LaunchType: FARGATE
+      LoadBalancers: 
+        - TargetGroupArn: !Ref TargetGroup
+          ContainerName: growi
+          ContainerPort: !Ref AppPort
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref appSecurityGroup
+          Subnets: !Ref PrivateSubnetIds
+      TaskDefinition: !Ref GrowiTaskDefinition
+
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: application
+      Scheme: internet-facing
+      Subnets: !Ref PublicSubnetIds
+      SecurityGroups:
+        - !Ref elbSecurityGroup
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '10'
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      TargetType: ip
+      Protocol: HTTP
+      Port: !Ref AppPort
+      VpcId: !Ref VpcId
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      Matcher:
+        HttpCode: 200,302
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '10'
+        - Key: slow_start.duration_seconds
+          Value: '30'
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Protocol: HTTP
+      Port: '80'
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  User:
+    Type: AWS::IAM::User
+    Properties: 
+      Path: "/"
+      Policies:
+        - PolicyName: s3
+          PolicyDocument: !Sub |
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "s3:DeleteObject",
+                            "s3:GetBucketLocation",
+                            "s3:GetObject",
+                            "s3:ListBucket",
+                            "s3:PutObject",
+                            "s3:PutObjectAcl"
+                        ],
+                        "Resource": [
+                            "${Bucket.Arn}",
+                            "${Bucket.Arn}/*"
+                        ]
+                    }
+                ]
+            }
+
+  AccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties: 
+      Serial: 1
+      #Status: String
+      UserName: !Ref User
+
+  Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub 'growi-${NodeEnv}-${AWS::Region}-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        IgnorePublicAcls: false
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+#  Elasticsearch:
+#    Type: AWS::Elasticsearch::Domain
+#    Properties: 
+#      #AccessPolicies: Json
+#      #AdvancedOptions: 
+#      #  Key : Value
+#      #DomainName: String
+#      #EBSOptions: 
+#      #  EBSOptions
+#      #ElasticsearchClusterConfig: 
+#      #  ElasticsearchClusterConfig
+#      ElasticsearchVersion: "7.1"
+#      #EncryptionAtRestOptions: 
+#      #  EncryptionAtRestOptions
+#      #NodeToNodeEncryptionOptions: 
+#      #  NodeToNodeEncryptionOptions
+#      #SnapshotOptions: 
+#      #  SnapshotOptions
+#      #Tags: 
+#      #  - Tag
+#      #VPCOptions: 
+#      #  VPCOptions
+
+Outputs:
+
+  Bucket:
+    Value: !Ref Bucket
+
+  AccessKey:
+    Value: !Ref AccessKey
+
+  SecretAccessKey:
+    Value: !GetAtt AccessKey.SecretAccessKey
+
+  GetDBPasswordByCLI:
+    Value: !Sub |+
+        aws secretsmanager get-secret-value
+          --secret-id ${GrowiDBSecret}
+          --region ${AWS::Region}
+          --query SecretString
