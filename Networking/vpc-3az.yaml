@@ -211,44 +211,44 @@ Resources:
       NetworkAclId: !GetAtt VPC.DefaultNetworkAcl
 
   NatGateway01:
-    DependsOn: VPCGatewayAttachment
     Type: AWS::EC2::NatGateway
+    DependsOn: VPCGatewayAttachment
     Properties:
       AllocationId: !GetAtt NatEIP01.AllocationId
       SubnetId: !Ref PublicSubnet01
 
   NatGateway02:
-    DependsOn: VPCGatewayAttachment
     Type: AWS::EC2::NatGateway
+    DependsOn: VPCGatewayAttachment
     Condition: CreateMultipleNatGateway
     Properties:
       AllocationId: !GetAtt NatEIP02.AllocationId
       SubnetId: !Ref PublicSubnet02
 
   NatGateway03:
-    DependsOn: VPCGatewayAttachment
     Type: AWS::EC2::NatGateway
+    DependsOn: VPCGatewayAttachment
     Condition: CreateMultipleNatGateway
     Properties:
       AllocationId: !GetAtt NatEIP03.AllocationId
       SubnetId: !Ref PublicSubnet03
 
   NatEIP01:
-    DependsOn: VPCGatewayAttachment
     Type: AWS::EC2::EIP
+    DependsOn: VPCGatewayAttachment
     Properties:
       Domain: vpc
 
   NatEIP02:
-    DependsOn: VPCGatewayAttachment
     Type: AWS::EC2::EIP
+    DependsOn: VPCGatewayAttachment
     Condition: CreateMultipleNatGateway
     Properties:
       Domain: vpc
 
   NatEIP03:
-    DependsOn: VPCGatewayAttachment
     Type: AWS::EC2::EIP
+    DependsOn: VPCGatewayAttachment
     Condition: CreateMultipleNatGateway
     Properties:
       Domain: vpc
@@ -391,6 +391,7 @@ Resources:
 
   ClientVpnRoute01:
     Type: AWS::EC2::ClientVpnRoute
+    DependsOn: ClientVpnTargetNetworkAssociation01
     Condition: CreateClientVpnEndpoint
     Properties: 
       ClientVpnEndpointId: !Ref ClientVpnEndpoint
@@ -399,6 +400,7 @@ Resources:
 
   ClientVpnRoute02:
     Type: AWS::EC2::ClientVpnRoute
+    DependsOn: ClientVpnTargetNetworkAssociation02
     Condition: CreateClientVpnEndpoint
     Properties: 
       ClientVpnEndpointId: !Ref ClientVpnEndpoint
@@ -407,6 +409,7 @@ Resources:
 
   ClientVpnRoute03:
     Type: AWS::EC2::ClientVpnRoute
+    DependsOn: ClientVpnTargetNetworkAssociation03
     Condition: CreateClientVpnEndpoint
     Properties: 
       ClientVpnEndpointId: !Ref ClientVpnEndpoint
