@@ -6,7 +6,7 @@ Parameters:
 
   VpcBlock:
     Type: String
-    Default: 10.50.0.0/16
+    Default: 10.0.0.0/16
     Description: The CIDR range for the VPC. This should be a valid private (RFC 1918) CIDR range.
 
   SingleNatGateway:
@@ -370,6 +370,7 @@ Resources:
 
   ClientVpnTargetNetworkAssociation01:
     Type: AWS::EC2::ClientVpnTargetNetworkAssociation
+    DependsOn: VPCGatewayAttachment
     Condition: CreateClientVpnEndpoint
     Properties: 
       ClientVpnEndpointId: !Ref ClientVpnEndpoint
@@ -377,6 +378,7 @@ Resources:
 
   ClientVpnTargetNetworkAssociation02:
     Type: AWS::EC2::ClientVpnTargetNetworkAssociation
+    DependsOn: VPCGatewayAttachment
     Condition: CreateClientVpnEndpoint
     Properties: 
       ClientVpnEndpointId: !Ref ClientVpnEndpoint
@@ -384,6 +386,7 @@ Resources:
 
   ClientVpnTargetNetworkAssociation03:
     Type: AWS::EC2::ClientVpnTargetNetworkAssociation
+    DependsOn: VPCGatewayAttachment
     Condition: CreateClientVpnEndpoint
     Properties: 
       ClientVpnEndpointId: !Ref ClientVpnEndpoint

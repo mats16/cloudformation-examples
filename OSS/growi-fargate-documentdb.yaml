@@ -13,9 +13,9 @@ Parameters:
   PrivateSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
 
-  GrowiVersion:
+  GrowiDockerImage:
     Type: String
-    Default: 3.5.18
+    Default: weseek/growi:3.5.18
 
   NodeEnv:
     Type: String
@@ -47,6 +47,48 @@ Parameters:
       - db.r5.12xlarge
       - db.r5.24xlarge
 
+  ElasticsearchDedicatedMasterEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+
+  ElasticsearchDedicatedMasterType:
+    Type: String
+    Default: t2.small.elasticsearch
+    AllowedValues:
+      - t2.small.elasticsearch
+
+  ElasticsearchInstanceCount:
+    Type: Number
+    Default: 2
+
+  ElasticsearchInstanceType:
+    Type: String
+    Default: t2.small.elasticsearch
+    AllowedValues:
+      - t2.small.elasticsearch
+      - t2.medium.elasticsearch
+      - m5.large.elasticsearch
+      - m5.xlarge.elasticsearch
+      - m5.2xlarge.elasticsearch
+      - m5.4xlarge.elasticsearch
+      - m5.12xlarge.elasticsearch
+
+  ElasticsearchVolumeSize:
+    Type: Number
+    Default: 10
+
+  ElasticsearchVersion:
+    Type: String
+    Default: 6.8
+    AllowedValues:
+      - 7.1
+      - 6.8
+      - 6.7
+    "Description" : "7.1 is not supported yet."
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -61,12 +103,26 @@ Metadata:
         Label:
           default: "Application Configuration"
         Parameters:
-          - GrowiVersion
+          - GrowiDockerImage
           - NodeEnv
           - AppPort
+      -
+        Label:
+          default: "MongoDB Configuration"
+        Parameters:
           - DBUsername
           - DBPort
           - DBInstanceClass
+      -
+        Label:
+          default: "Elasticsearch Configuration"
+        Parameters:
+          - ElasticsearchDedicatedMasterEnabled
+          - ElasticsearchDedicatedMasterType
+          - ElasticsearchInstanceCount
+          - ElasticsearchInstanceType
+          - ElasticsearchVolumeSize
+          - ElasticsearchVersion
     ParameterLabels: {}
 
 Resources:
@@ -109,8 +165,8 @@ Resources:
           SourceSecurityGroupId: !Ref appSecurityGroup
         - Description: for Elasticsearch
           IpProtocol: tcp
-          FromPort: 9200
-          ToPort: 9200
+          FromPort: 443
+          ToPort: 443
           SourceSecurityGroupId: !Ref appSecurityGroup
       VpcId: !Ref VpcId
 
@@ -172,33 +228,20 @@ Resources:
   #            Service: 
   #              - "ecs-tasks.amazonaws.com"
   #          Action: "sts:AssumeRole"
-  #    Path: "/"
-  #    Policies:
-  #      - PolicyName: s3
-  #        PolicyDocument: !Sub |
-  #          {
-  #              "Version": "2012-10-17",
-  #              "Statement": [
-  #                  {
-  #                      "Effect": "Allow",
-  #                      "Action": "s3:*",
-  #                      "Resource": "${Bucket.Arn}"
-  #                  }
-  #              ]
-  #          }
+  #    Path: /
+  #    Policies: []
 
   LogGroup: 
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub ${AWS::StackName}/ecs
+      LogGroupName: !Sub /ecs/${AWS::StackName}
       RetentionInDays: 7
 
-  GrowiTaskDefinition: 
+  TaskDefinition: 
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: GrowiTaskDefinition
-      RequiresCompatibilities:
-        - "EC2"
+      Family: !Sub ${AWS::StackName}
+      RequiresCompatibilities: 
         - "FARGATE"
       NetworkMode: awsvpc
       Cpu: "256"
@@ -208,7 +251,7 @@ Resources:
       ContainerDefinitions: 
         - 
           Name: growi
-          Image: !Sub 'weseek/growi:${GrowiVersion}'
+          Image: !Ref GrowiDockerImage
           Essential: "true"
           PortMappings: 
             - ContainerPort: !Ref AppPort
@@ -219,8 +262,8 @@ Resources:
               Value: !Ref NodeEnv
             - Name: PORT
               Value: !Ref AppPort
-            #- Name: ELASTICSEARCH_URI
-            #  Value: !Ref AppPort
+            - Name: ELASTICSEARCH_URI
+              Value: !Sub 'https://${Elasticsearch.DomainEndpoint}/growi'
           #Secrets:
           #  - Name: DB_SECRET
           #    ValueFrom: !Ref GrowiDBSecret
@@ -229,18 +272,18 @@ Resources:
             Options:
               awslogs-region: !Ref AWS::Region
               awslogs-group: !Ref LogGroup
-              awslogs-stream-prefix: stdout
+              awslogs-stream-prefix: ecs
 
-  GrowiCluster:
+  Cluster:
     Type: AWS::ECS::Cluster
 
-  GrowiService:
+  Service:
     Type: AWS::ECS::Service
     DependsOn: Listener
     Properties: 
-      Cluster: !Ref GrowiCluster
+      Cluster: !Ref Cluster
       DesiredCount: 1
-      #EnableECSManagedTags: Boolean
+      #EnableECSManagedTags: true
       #HealthCheckGracePeriodSeconds: Integer
       LaunchType: FARGATE
       LoadBalancers: 
@@ -252,7 +295,7 @@ Resources:
           SecurityGroups:
             - !Ref appSecurityGroup
           Subnets: !Ref PrivateSubnetIds
-      TaskDefinition: !Ref GrowiTaskDefinition
+      TaskDefinition: !Ref TaskDefinition
 
   ALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -274,9 +317,9 @@ Resources:
       Port: !Ref AppPort
       VpcId: !Ref VpcId
       HealthCheckProtocol: HTTP
-      HealthCheckPath: /
+      HealthCheckPath: /_api/v3/healthcheck
       Matcher:
-        HttpCode: 200,302
+        HttpCode: 200
       TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
           Value: '10'
@@ -325,7 +368,7 @@ Resources:
     Type: AWS::IAM::AccessKey
     Properties: 
       Serial: 1
-      #Status: String
+      Status: Active
       UserName: !Ref User
 
   Bucket:
@@ -341,6 +384,7 @@ Resources:
 
   Elasticsearch:
     Type: AWS::Elasticsearch::Domain
+    DependsOn: LogsResourcePolicy
     Properties: 
       AccessPolicies: !Sub |
         {
@@ -360,23 +404,20 @@ Resources:
             }
           ]
         }
-      #AdvancedOptions: 
-      #  Key : Value
-      #DomainName: String
       EBSOptions: 
         EBSEnabled: true
-        VolumeSize: 10
+        VolumeSize: !Ref ElasticsearchVolumeSize
         VolumeType: gp2
       ElasticsearchClusterConfig: 
         #DedicatedMasterCount: 3
-        DedicatedMasterEnabled: false
-        #DedicatedMasterType: "t2.small.elasticsearch"
-        InstanceCount: 2
-        InstanceType: "t2.small.elasticsearch"
+        DedicatedMasterEnabled: !Ref ElasticsearchDedicatedMasterEnabled
+        #DedicatedMasterType: !Ref ElasticsearchDedicatedMasterType
+        InstanceCount: !Ref ElasticsearchInstanceCount
+        InstanceType: !Ref ElasticsearchInstanceType
         ZoneAwarenessConfig:
            AvailabilityZoneCount: 2
         ZoneAwarenessEnabled: true
-      ElasticsearchVersion: "7.1"
+      ElasticsearchVersion: !Ref ElasticsearchVersion
       #EncryptionAtRestOptions: 
       #  EncryptionAtRestOptions
       #NodeToNodeEncryptionOptions: 
@@ -391,6 +432,151 @@ Resources:
         SubnetIds:
           - !Select [ 0, !Ref PrivateSubnetIds ]
           - !Select [ 1, !Ref PrivateSubnetIds ]
+      #AdvancedOptions: 
+      #  rest.action.multi.allow_explicit_index: "true"
+      LogPublishingOptions:
+        INDEX_SLOW_LOGS:
+          CloudWatchLogsLogGroupArn: !Sub "${ElasticsearchSlowLogGroup.Arn}"
+          Enabled: true
+        SEARCH_SLOW_LOGS:
+          CloudWatchLogsLogGroupArn: !Sub "${ElasticsearchIndexLogGroup.Arn}"
+          Enabled: true
+        ES_APPLICATION_LOGS:
+          CloudWatchLogsLogGroupArn: !Sub "${ElasticsearchErrorLogGroup.Arn}"
+          Enabled: true
+
+  ElasticsearchSlowLogGroup: 
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/aes/stacks/${AWS::StackName}/search-logs
+      RetentionInDays: 7
+
+  ElasticsearchIndexLogGroup: 
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/aes/stacks/${AWS::StackName}/index-logs
+      RetentionInDays: 7
+
+  ElasticsearchErrorLogGroup: 
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/aes/stacks/${AWS::StackName}/application-logs
+      RetentionInDays: 7
+
+  # Custom Resource
+  PutPolicyFunctionRole: 
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: "Allow"
+            Principal:
+              "Service": "lambda.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Path: /
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+      Policies:
+        - PolicyName: PutResourcePolicy
+          PolicyDocument: !Sub |
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                          "logs:DeleteResourcePolicy",
+                          "logs:PutResourcePolicy"
+                        ],
+                        "Resource": [
+                            "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group::log-stream:"
+                        ]
+                    }
+                ]
+            }
+
+  PutPolicyFunction: 
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Runtime: "python3.6"
+      Role: !Sub ${PutPolicyFunctionRole.Arn}
+      Timeout: 5
+      TracingConfig:
+        Mode: "Active"
+      Handler: "index.handler"
+      Code:
+        ZipFile: |
+          from __future__ import print_function
+          import cfnresponse
+          import boto3
+          from botocore.exceptions import ClientError
+          import json
+
+          client = boto3.client('logs')
+
+          def PutPolicy(name, document):
+              response = client.put_resource_policy(
+                policyName=name,
+                policyDocument=document,
+              )
+              return
+
+          def DeletePolicy(name):
+              response = client.delete_resource_policy(
+                  policyName=name,
+              )
+              return
+
+          def handler(event, context):
+              print(json.dumps(event))
+              PolicyName = event['ResourceProperties']['PolicyName']
+              PolicyDocument = event['ResourceProperties']['PolicyDocument']
+              responseData = {}
+              try:
+                  if event['RequestType'] == "Delete":
+                      DeletePolicy(PolicyName)
+                  elif event['RequestType'] == "Create":
+                      PutPolicy(PolicyName, PolicyDocument)
+                  responseData['Data'] = "SUCCESS"
+                  status=cfnresponse.SUCCESS
+              except ClientError as e:
+                  responseData['Data'] = "FAILED"
+                  status=cfnresponse.FAILED
+                  print("Unexpected client error: %s" % e)
+              except Exception as e:
+                  responseData['Data'] = "FAILED"
+                  status=cfnresponse.FAILED
+                  print("Unexpected error: %s" % e)
+              cfnresponse.send(event, context, status, responseData, "CustomResourcePhysicalID")
+
+  LogsResourcePolicy:
+    Type: Custom::LogsResourcePolicy
+    Version: 1.0
+    Properties:
+      ServiceToken: !Sub ${PutPolicyFunction.Arn}
+      PolicyName: !Sub ${AWS::StackName}-elasticsearch-logs
+      PolicyDocument: !Sub '{
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "0", 
+            "Effect": "Allow", 
+            "Principal": { "Service": "es.amazonaws.com" },
+            "Action":[
+              "logs:PutLogEvents",
+              "logs:PutLogEventsBatch",
+              "logs:CreateLogStream"
+            ],
+            "Resource": [
+              "${ElasticsearchSlowLogGroup.Arn}",
+              "${ElasticsearchIndexLogGroup.Arn}",
+              "${ElasticsearchErrorLogGroup.Arn}"
+            ]
+          }
+        ]
+      }'
 
 Outputs:
 
