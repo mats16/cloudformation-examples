@@ -18,7 +18,7 @@ Parameters:
 
   ServerCertificateArn:
     Type: String
-    Default: no-client-vpn
+    Default: ''
     Description: The Certificate for Client VPN Endpoint
 
 Metadata:
@@ -38,7 +38,7 @@ Metadata:
 Conditions:
   CreateSingleNatGateway: !Equals [ !Ref SingleNatGateway, true ]
   CreateMultipleNatGateway: !Equals [ !Ref SingleNatGateway, false ]
-  CreateClientVpnEndpoint: !Not [ !Equals [ !Ref ServerCertificateArn, 'no-client-vpn' ] ]
+  CreateClientVpnEndpoint: !Not [ !Equals [ !Ref ServerCertificateArn, '' ] ]
 
 Resources:
 
@@ -65,8 +65,6 @@ Resources:
       Tags:
       - Key: Name
         Value: !Sub "${AWS::StackName}-PublicSubnet01"
-      - Key: kubernetes.io/role/elb
-        Value: '1'
 
   PublicSubnet02:
     Type: AWS::EC2::Subnet
@@ -81,8 +79,6 @@ Resources:
       Tags:
       - Key: Name
         Value: !Sub "${AWS::StackName}-PublicSubnet02"
-      - Key: kubernetes.io/role/elb
-        Value: '1'
 
   PublicSubnet03:
     Type: AWS::EC2::Subnet
@@ -97,8 +93,45 @@ Resources:
       Tags:
       - Key: Name
         Value: !Sub "${AWS::StackName}-PublicSubnet03"
-      - Key: kubernetes.io/role/elb
-        Value: '1'
+
+  SecureSubnet01:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ 3, !Cidr [ !Ref VpcBlock, 6, 8 ] ]
+      AvailabilityZone:
+        Fn::Select:
+        - '0'
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-SecureSubnet01"
+
+  SecureSubnet02:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ 4, !Cidr [ !Ref VpcBlock, 6, 8 ] ]
+      AvailabilityZone:
+        Fn::Select:
+        - '1'
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-SecureSubnet02"
+
+  SecureSubnet03:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ 5, !Cidr [ !Ref VpcBlock, 6, 8 ] ]
+      AvailabilityZone:
+        Fn::Select:
+        - '2'
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-SecureSubnet03"
 
   PrivateSubnet01:
     Type: AWS::EC2::Subnet
@@ -112,8 +145,6 @@ Resources:
       Tags:
       - Key: Name
         Value: !Sub "${AWS::StackName}-PrivateSubnet01"
-      - Key: kubernetes.io/role/internal-elb
-        Value: '1'
 
   PrivateSubnet02:
     Type: AWS::EC2::Subnet
@@ -127,8 +158,6 @@ Resources:
       Tags:
       - Key: Name
         Value: !Sub "${AWS::StackName}-PrivateSubnet02"
-      - Key: kubernetes.io/role/internal-elb
-        Value: '1'
 
   PrivateSubnet03:
     Type: AWS::EC2::Subnet
@@ -142,8 +171,6 @@ Resources:
       Tags:
       - Key: Name
         Value: !Sub "${AWS::StackName}-PrivateSubnet03"
-      - Key: kubernetes.io/role/internal-elb
-        Value: '1'
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
@@ -444,6 +471,24 @@ Outputs:
     Value: !Ref PublicSubnet03
     Export:
       Name: !Sub "${AWS::StackName}-PublicSubnet03ID"
+
+  SecureSubnet01:
+    Description: Secure subnet 01 ID
+    Value: !Ref SecureSubnet01
+    Export:
+      Name: !Sub "${AWS::StackName}-SecureSubnet01ID"
+
+  SecureSubnet02:
+    Description: Secure subnet 02 ID
+    Value: !Ref SecureSubnet02
+    Export:
+      Name: !Sub "${AWS::StackName}-SecureSubnet02ID"
+
+  SecureSubnet03:
+    Description: Secure subnet 03 ID
+    Value: !Ref SecureSubnet03
+    Export:
+      Name: !Sub "${AWS::StackName}-SecureSubnet03ID"
 
   PrivateSubnet01:
     Description: Private subnet 01 ID
