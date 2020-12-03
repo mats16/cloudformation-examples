@@ -15,11 +15,12 @@ Parameters:
     AllowedValues:
       - true
       - false
+    Description: Set to "false", if you use independent Nat Gateway in each AvailabilityZone.
 
   ServerCertificateArn:
     Type: String
-    Default: ''
-    Description: The Certificate for Client VPN Endpoint
+    Default: none
+    Description: Set to "none", if you do not use VPN.
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -34,11 +35,15 @@ Metadata:
     ParameterLabels:
       VpcBlock:
         default: VPC Block
+      SingleNatGateway:
+        default: Use Single NatGateway at each AvailabilityZone
+      ServerCertificateArn:
+        default: Server Certificate ARN for Client VPN
 
 Conditions:
   CreateSingleNatGateway: !Equals [ !Ref SingleNatGateway, true ]
   CreateMultipleNatGateway: !Equals [ !Ref SingleNatGateway, false ]
-  CreateClientVpnEndpoint: !Not [ !Equals [ !Ref ServerCertificateArn, '' ] ]
+  CreateClientVpnEndpoint: !Not [ !Equals [ !Ref ServerCertificateArn, 'none' ] ]
 
 Resources:
 
