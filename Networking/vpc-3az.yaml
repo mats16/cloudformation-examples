@@ -17,11 +17,6 @@ Parameters:
       - false
     Description: Set to "false", if you use independent Nat Gateway in each AvailabilityZone.
 
-  ServerCertificateArn:
-    Type: String
-    Default: none
-    Description: Set to "none", if you do not use VPN.
-
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -31,19 +26,15 @@ Metadata:
         Parameters:
           - VpcBlock
           - SingleNatGateway
-          - ServerCertificateArn
     ParameterLabels:
       VpcBlock:
         default: VPC Block
       SingleNatGateway:
         default: Use Single NatGateway at each AvailabilityZone
-      ServerCertificateArn:
-        default: Server Certificate ARN for Client VPN
 
 Conditions:
   CreateSingleNatGateway: !Equals [ !Ref SingleNatGateway, true ]
   CreateMultipleNatGateway: !Equals [ !Ref SingleNatGateway, false ]
-  CreateClientVpnEndpoint: !Not [ !Equals [ !Ref ServerCertificateArn, 'none' ] ]
 
 Resources:
 
@@ -370,86 +361,6 @@ Resources:
     Properties:
       SubnetId: !Ref PrivateSubnet03
       RouteTableId: !Ref NatRouteTable01
-
-  # Client VPN
-  ClientVpnEndpoint:
-    Type: AWS::EC2::ClientVpnEndpoint
-    Condition: CreateClientVpnEndpoint
-    Properties:
-      #Description: String
-      ClientCidrBlock: !Select [ 63, !Cidr [ !Ref VpcBlock, 64, 10 ] ]
-      ServerCertificateArn: !Ref ServerCertificateArn
-      AuthenticationOptions: 
-        - MutualAuthentication: 
-            ClientRootCertificateChainArn: !Ref ServerCertificateArn
-          Type: certificate-authentication
-      ConnectionLogOptions: 
-        #CloudwatchLogGroup: String
-        #CloudwatchLogStream: String
-        Enabled: false
-      DnsServers: 
-        - !Join [ ".", [ !Select [0, !Split [ "." , !Ref VpcBlock ] ], !Select [1, !Split [ "." , !Ref VpcBlock ] ], !Select [2, !Split [ "." , !Ref VpcBlock ] ], 2 ] ]
-      TransportProtocol: udp
-      SplitTunnel: true
-
-  ClientVpnAuthorizationRule:
-    Type: AWS::EC2::ClientVpnAuthorizationRule
-    Condition: CreateClientVpnEndpoint
-    Properties: 
-      AuthorizeAllGroups: true
-      ClientVpnEndpointId: !Ref ClientVpnEndpoint
-      TargetNetworkCidr: 0.0.0.0/0
-
-  ClientVpnTargetNetworkAssociation01:
-    Type: AWS::EC2::ClientVpnTargetNetworkAssociation
-    DependsOn: VPCGatewayAttachment
-    Condition: CreateClientVpnEndpoint
-    Properties: 
-      ClientVpnEndpointId: !Ref ClientVpnEndpoint
-      SubnetId: !Ref PrivateSubnet01
-
-  ClientVpnTargetNetworkAssociation02:
-    Type: AWS::EC2::ClientVpnTargetNetworkAssociation
-    DependsOn: VPCGatewayAttachment
-    Condition: CreateClientVpnEndpoint
-    Properties: 
-      ClientVpnEndpointId: !Ref ClientVpnEndpoint
-      SubnetId: !Ref PrivateSubnet02
-
-  ClientVpnTargetNetworkAssociation03:
-    Type: AWS::EC2::ClientVpnTargetNetworkAssociation
-    DependsOn: VPCGatewayAttachment
-    Condition: CreateClientVpnEndpoint
-    Properties: 
-      ClientVpnEndpointId: !Ref ClientVpnEndpoint
-      SubnetId: !Ref PrivateSubnet03
-
-  ClientVpnRoute01:
-    Type: AWS::EC2::ClientVpnRoute
-    DependsOn: ClientVpnTargetNetworkAssociation01
-    Condition: CreateClientVpnEndpoint
-    Properties: 
-      ClientVpnEndpointId: !Ref ClientVpnEndpoint
-      DestinationCidrBlock: !Select [ 0, !Cidr [ !Ref VpcBlock, 6, 8 ] ]
-      TargetVpcSubnetId: !Ref PrivateSubnet01
-
-  ClientVpnRoute02:
-    Type: AWS::EC2::ClientVpnRoute
-    DependsOn: ClientVpnTargetNetworkAssociation02
-    Condition: CreateClientVpnEndpoint
-    Properties: 
-      ClientVpnEndpointId: !Ref ClientVpnEndpoint
-      DestinationCidrBlock: !Select [ 1, !Cidr [ !Ref VpcBlock, 6, 8 ] ]
-      TargetVpcSubnetId: !Ref PrivateSubnet02
-
-  ClientVpnRoute03:
-    Type: AWS::EC2::ClientVpnRoute
-    DependsOn: ClientVpnTargetNetworkAssociation03
-    Condition: CreateClientVpnEndpoint
-    Properties: 
-      ClientVpnEndpointId: !Ref ClientVpnEndpoint
-      DestinationCidrBlock: !Select [ 2, !Cidr [ !Ref VpcBlock, 6, 8 ] ]
-      TargetVpcSubnetId: !Ref PrivateSubnet03
 
 Outputs:
 
